@@ -261,6 +261,53 @@ describe('IdleCapitalAnalyzer', () => {
     expect(result.monthlyBurnRateUSD).toBe(0);
   });
 
+  it('cuenta CARD_SPENT (tipo real de la API) como egreso al calcular burn rate', async () => {
+    const now = Date.now();
+    const txs: Transaction[] = [
+      {
+        uuid: 'tx-card-1',
+        type: 'CARD_SPENT',
+        external_address: 'AMAZON MKTPLACE PMTS',
+        source_currency: { code: 'USD', alias: 'USD' },
+        dest_currency: { code: 'USD', alias: 'USD' },
+        source_amount: 267.71,
+        dest_amount: 267.71,
+        status: 'COMPLETED',
+        created_at: new Date(now - 86_400_000).toISOString(),
+        comment: null,
+      },
+      {
+        uuid: 'tx-card-2',
+        type: 'CARD_SPENT',
+        external_address: 'CLAUDE.AI SUBSCRIPTION',
+        source_currency: { code: 'USD', alias: 'USD' },
+        dest_currency: { code: 'USD', alias: 'USD' },
+        source_amount: 20,
+        dest_amount: 20,
+        status: 'COMPLETED',
+        created_at: new Date(now - 2 * 86_400_000).toISOString(),
+        comment: null,
+      },
+    ];
+
+    const { client, poller } = buildMocks({
+      checking: [{ currency: 'USD', balance: 5000 }],
+      transactions: txs,
+    });
+
+    const analyzer = new IdleCapitalAnalyzer({
+      client,
+      poller,
+      analysisDays: 30,
+      idleThresholdUsd: 500,
+      checkingBufferMultiplier: 1.5,
+    });
+
+    const result = await analyzer.analyze();
+
+    expect(result.monthlyBurnRateUSD).toBe(287.71);
+  });
+
   it('cuenta WITHDRAWAL_LOCAL como egreso al calcular burn rate', async () => {
     const now = Date.now();
     const withdrawalTx: Transaction[] = [

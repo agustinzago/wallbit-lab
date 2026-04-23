@@ -33,12 +33,20 @@ const MIN_BUFFER_USD = 200;
 const TBILL_ANNUAL_YIELD = 0.05;
 
 // Tipos de transacción considerados "egresos" (gasto real del usuario). La API
-// no publica un enum cerrado, así que matcheamos por prefijo/contiene: cubre
-// WITHDRAWAL_LOCAL, WITHDRAWAL_CRYPTO, CARD_PAYMENT, FEE, etc., sin rompernos
-// cuando aparezcan nuevos.
+// no publica un enum cerrado, así que matcheamos por prefijo/contiene. Tipos
+// confirmados en responses reales:
+//   - CARD_SPENT          → gasto con tarjeta Wallbit (Amazon, Apple, etc.)
+//   - WITHDRAWAL_ACH      → transferencia ACH saliente (p.ej. a IBKR)
+//   - WITHDRAWAL_LOCAL    → retiro a banco local (AR)
+//   - WITHDRAWAL_CRYPTO   → retiro a wallet cripto
+//   - FEE                 → comisiones
+// Mantenemos CARD_PAYMENT/CARD_PURCHASE como defensa por si la API los agrega.
+// Excluidos (ingresos o internos sin salida de plata): DEPOSIT, REWARD, TRADE,
+// TRANSFER_INTERNAL, INTEREST.
 function isEgressType(type: string): boolean {
   const t = type.toUpperCase();
   if (t.startsWith('WITHDRAWAL')) return true;
+  if (t === 'CARD_SPENT') return true;
   if (t.includes('CARD_PAYMENT') || t.includes('CARD_PURCHASE')) return true;
   if (t === 'FEE') return true;
   return false;
