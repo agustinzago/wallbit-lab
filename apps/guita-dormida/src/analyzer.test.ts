@@ -166,6 +166,160 @@ describe('IdleCapitalAnalyzer', () => {
     expect(result.idleAssets.find((a) => a.category === 'investment_cash')).toBeUndefined();
   });
 
+  it('usa MIN_BUFFER_USD (200) como piso cuando no hay transacciones (burn=0)', async () => {
+    const { client, poller } = buildMocks({
+      checking: [{ currency: 'USD', balance: 800 }],
+      transactions: [],
+    });
+
+    const analyzer = new IdleCapitalAnalyzer({
+      client,
+      poller,
+      analysisDays: 30,
+      idleThresholdUsd: 100,
+      checkingBufferMultiplier: 1.5,
+    });
+
+    const result = await analyzer.analyze();
+
+    // burn=0 → buffer candidato sería 0*1.5=0, pero el piso es 200.
+    expect(result.recommendedBufferUSD).toBe(200);
+    expect(result.monthlyBurnRateUSD).toBe(0);
+    // 800 - 200 = 600 > threshold 100 → debe reportar.
+    const asset = result.idleAssets.find((a) => a.category === 'checking');
+    expect(asset?.amount).toBe(600);
+  });
+
+  it('normaliza burn rate a 30 días cuando analysisDays es 60', async () => {
+    // En 60 días gastamos 2000 USD → normalizado a 30 días = 1000/mes.
+    const { client, poller } = buildMocks({
+      checking: [{ currency: 'USD', balance: 10_000 }],
+      transactions: buildEgressTxs(2000, 60),
+    });
+
+    const analyzer = new IdleCapitalAnalyzer({
+      client,
+      poller,
+      analysisDays: 60,
+      idleThresholdUsd: 500,
+      checkingBufferMultiplier: 1.5,
+    });
+
+    const result = await analyzer.analyze();
+
+    expect(result.monthlyBurnRateUSD).toBe(1000);
+    expect(result.recommendedBufferUSD).toBe(1500);
+    // 10000 - 1500 = 8500 de exceso.
+    expect(result.idleAssets.find((a) => a.category === 'checking')?.amount).toBe(8500);
+  });
+
+  it('ignora DEPOSIT y TRADE al calcular burn rate (no son egresos)', async () => {
+    const now = Date.now();
+    const nonEgressTxs: Transaction[] = [
+      {
+        uuid: 'tx-deposit',
+        type: 'DEPOSIT',
+        external_address: null,
+        source_currency: { code: 'USD', alias: 'USD' },
+        dest_currency: { code: 'USD', alias: 'USD' },
+        source_amount: 5000,
+        dest_amount: 5000,
+        status: 'COMPLETED',
+        created_at: new Date(now - 86_400_000).toISOString(),
+        comment: null,
+      },
+      {
+        uuid: 'tx-trade',
+        type: 'TRADE',
+        external_address: null,
+        source_currency: { code: 'USD', alias: 'USD' },
+        dest_currency: { code: 'USD', alias: 'USD' },
+        source_amount: 1000,
+        dest_amount: 1000,
+        status: 'COMPLETED',
+        created_at: new Date(now - 86_400_000).toISOString(),
+        comment: null,
+      },
+    ];
+
+    const { client, poller } = buildMocks({
+      checking: [{ currency: 'USD', balance: 5000 }],
+      transactions: nonEgressTxs,
+    });
+
+    const analyzer = new IdleCapitalAnalyzer({
+      client,
+      poller,
+      analysisDays: 30,
+      idleThresholdUsd: 500,
+      checkingBufferMultiplier: 1.5,
+    });
+
+    const result = await analyzer.analyze();
+
+    // Depósitos y trades no cuentan como gasto — burn rate = 0.
+    expect(result.monthlyBurnRateUSD).toBe(0);
+  });
+
+  it('cuenta WITHDRAWAL_LOCAL como egreso al calcular burn rate', async () => {
+    const now = Date.now();
+    const withdrawalTx: Transaction[] = [
+      {
+        uuid: 'tx-withdrawal',
+        type: 'WITHDRAWAL_LOCAL',
+        external_address: 'Juan Perez',
+        source_currency: { code: 'USD', alias: 'USD' },
+        dest_currency: { code: 'USD', alias: 'USD' },
+        source_amount: 800,
+        dest_amount: 800,
+        status: 'COMPLETED',
+        created_at: new Date(now - 86_400_000).toISOString(),
+        comment: null,
+      },
+    ];
+
+    const { client, poller } = buildMocks({
+      checking: [{ currency: 'USD', balance: 5000 }],
+      transactions: withdrawalTx,
+    });
+
+    const analyzer = new IdleCapitalAnalyzer({
+      client,
+      poller,
+      analysisDays: 30,
+      idleThresholdUsd: 500,
+      checkingBufferMultiplier: 1.5,
+    });
+
+    const result = await analyzer.analyze();
+
+    expect(result.monthlyBurnRateUSD).toBe(800);
+    expect(result.recommendedBufferUSD).toBe(1200);
+  });
+
+  it('calcula opportunityCost correctamente (5% anual sobre los días)', async () => {
+    const { client, poller } = buildMocks({
+      checking: [{ currency: 'USD', balance: 5000 }],
+      transactions: buildEgressTxs(1000),
+    });
+
+    const analyzer = new IdleCapitalAnalyzer({
+      client,
+      poller,
+      analysisDays: 30,
+      idleThresholdUsd: 500,
+      checkingBufferMultiplier: 1.5,
+    });
+
+    const result = await analyzer.analyze();
+
+    // idle=3500, days=30 → 3500 * (0.05/365) * 30 ≈ 14.38
+    const asset = result.idleAssets.find((a) => a.category === 'checking');
+    expect(asset?.opportunityCost).toBeCloseTo(14.38, 1);
+    expect(result.totalIdleUSD).toBe(3500);
+    expect(result.totalOpportunityCost).toBeCloseTo(14.38, 1);
+  });
+
   it('cuando hasIdle=false, el reporte no menciona "Capital ocioso"', async () => {
     const { client, poller } = buildMocks({
       checking: [{ currency: 'USD', balance: 300 }],
