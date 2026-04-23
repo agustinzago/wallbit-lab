@@ -1,8 +1,14 @@
-// @wallbit-lab/notify
-//
-// TODO: Adapters concretos para la interfaz NotificationChannel de
-// @wallbit-lab/shared-types. Implementaciones previstas: Telegram (bot API),
-// email (Resend), console (fallback para dev). Cada app compone su lista de
-// canales en runtime según la UserConfig del usuario.
+// Re-exports públicos del package notify.
 
-export const NOTIFY_PLACEHOLDER = true;
+export type {
+  Logger,
+  NotificationChannel,
+  NotificationMessage,
+  ParseMode,
+} from './types.js';
+export { NotifyError } from './errors.js';
+export type { NotifyErrorOptions } from './errors.js';
+export { TelegramChannel, splitForTelegram } from './telegram.js';
+export type { TelegramChannelOptions } from './telegram.js';
+export { ConsoleChannel } from './console.js';
+export type { ConsoleChannelOptions } from './console.js';

@@ -107,6 +107,12 @@ importers:
       '@wallbit-lab/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@wallbit-lab/wallbit-ingest':
+        specifier: workspace:*
+        version: link:../../packages/wallbit-ingest
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
     devDependencies:
       '@types/node':
         specifier: ^22.9.0
@@ -117,6 +123,9 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@22.19.17)
 
   apps/nomina-autopilot:
     dependencies:
@@ -158,6 +167,9 @@ importers:
       '@wallbit-lab/shared-types':
         specifier: workspace:*
         version: link:../shared-types
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
     devDependencies:
       '@types/node':
         specifier: ^22.9.0

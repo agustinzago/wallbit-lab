@@ -20,7 +20,7 @@ const GetWalletsResponseSchema = z.object({
 export class WalletsResource {
   constructor(private readonly http: HttpClient) {}
 
-  async list(): Promise<Wallet[]> {
+  async getAll(): Promise<Wallet[]> {
     const res = await this.http.request({
       path: '/v1/wallets',
       schema: GetWalletsResponseSchema,
