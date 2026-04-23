@@ -320,7 +320,7 @@ describe('IdleCapitalAnalyzer', () => {
     expect(result.totalOpportunityCost).toBeCloseTo(14.38, 1);
   });
 
-  it('cuando hasIdle=false, el reporte no menciona "Capital ocioso"', async () => {
+  it('cuando hasIdle=false, el reporte muestra mensaje sobrio y omite Resumen/Detalle', async () => {
     const { client, poller } = buildMocks({
       checking: [{ currency: 'USD', balance: 300 }],
       transactions: buildEgressTxs(400),
@@ -338,7 +338,38 @@ describe('IdleCapitalAnalyzer', () => {
     const report = buildReport(result);
 
     expect(result.hasIdle).toBe(false);
-    expect(report).not.toContain('Capital ocioso');
-    expect(report).toContain('✅');
+    expect(report).toContain('No se detectaron activos ociosos');
+    expect(report).not.toContain('*Resumen*');
+    expect(report).not.toContain('*Detalle*');
+    // Sigue incluyendo contexto informativo aunque no haya ociosidad.
+    expect(report).toContain('*Contexto*');
+  });
+
+  it('cuando hasIdle=true, el reporte tiene Resumen, Detalle y Contexto', async () => {
+    const { client, poller } = buildMocks({
+      checking: [{ currency: 'USD', balance: 5000 }],
+      transactions: buildEgressTxs(1000),
+    });
+
+    const analyzer = new IdleCapitalAnalyzer({
+      client,
+      poller,
+      analysisDays: 30,
+      idleThresholdUsd: 500,
+      checkingBufferMultiplier: 1.5,
+    });
+
+    const result = await analyzer.analyze();
+    const report = buildReport(result);
+
+    expect(report).toContain('*Guita Dormida — Reporte diario*');
+    expect(report).toContain('*Resumen*');
+    expect(report).toContain('*Detalle*');
+    expect(report).toContain('*Contexto*');
+    // Formato es-AR: punto de miles, coma decimal.
+    expect(report).toContain('USD 3.500,00');
+    // No debe haber emojis ni caracteres decorativos.
+    expect(report).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
+    expect(report).not.toContain('━');
   });
 });
