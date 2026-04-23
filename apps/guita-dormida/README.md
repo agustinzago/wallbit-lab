@@ -68,13 +68,97 @@ Cuando estés conforme, poné `DRY_RUN=false` en `.env` y corré:
 pnpm --filter @wallbit-lab/app-guita-dormida analyze
 ```
 
-### 7. Cron diario
+### 7. Cron diario (opción A: tu máquina)
 
 Para que corra solo a las 9:00 am cada día, agregá a tu `crontab -e`:
 
 ```cron
 0 9 * * * cd /ruta/a/wallbit-lab && pnpm --filter @wallbit-lab/app-guita-dormida analyze >> /tmp/guita-dormida.log 2>&1
 ```
+
+### 7. Cron diario (opción B: Vercel)
+
+La app está preparada para correr como Serverless Function + Vercel Cron. El endpoint
+`api/analyze.ts` expone la misma lógica por HTTP y `vercel.json` declara el cron
+diario a las 12:00 UTC (= 9:00 ART, UTC-3).
+
+#### Deploy inicial
+
+1. Pusheá el repo a GitHub.
+2. En [vercel.com](https://vercel.com) → **Add New... → Project** → importá el repo.
+3. En la pantalla de configuración del proyecto, poné:
+   - **Root Directory:** `apps/guita-dormida`
+   - **Framework Preset:** Other
+   - Dejá los overrides de build/install como están: `vercel.json` ya los define.
+4. En **Environment Variables** cargá (marcá todas como Production):
+
+   ```
+   WALLBIT_API_KEY            = <tu key>
+   TELEGRAM_BOT_TOKEN         = <tu token>
+   TELEGRAM_CHAT_ID           = <tu chat id>
+   ANALYSIS_DAYS              = 30
+   IDLE_THRESHOLD_USD         = 500
+   CHECKING_BUFFER_MULTIPLIER = 1.5
+   DRY_RUN                    = true
+   CRON_SECRET                = <string random largo, generalo con `openssl rand -hex 32`>
+   ```
+
+   Dejá `DRY_RUN=true` hasta confirmar que los primeros runs se ven bien en los
+   logs. Cuando estés conforme, cambialo a `false` y redeployá (o editá la env
+   var en el dashboard).
+
+5. **Deploy.** Vercel va a correr `pnpm turbo build --filter=@wallbit-lab/app-guita-dormida`
+   (que a su vez compila todos los packages del workspace que dependen).
+
+#### Verificar
+
+Una vez deployado, probá el endpoint manualmente:
+
+```bash
+curl -H "Authorization: Bearer <CRON_SECRET>" \
+  https://<tu-proyecto>.vercel.app/api/analyze
+```
+
+Respuesta esperada (con `DRY_RUN=true`):
+
+```json
+{
+  "ok": true,
+  "dryRun": true,
+  "analyzedAt": "2026-04-23T12:00:00.000Z",
+  "totalIdleUSD": 0,
+  "totalOpportunityCost": 0,
+  "hasIdle": false,
+  "idleAssetCount": 0
+}
+```
+
+Sin el header `Authorization` correcto el endpoint devuelve 401. Si no seteás
+`CRON_SECRET`, el endpoint queda público — no hacelo.
+
+#### Cambiar el horario
+
+Editá el cron en [vercel.json](./vercel.json). El formato es estándar (UTC).
+Ejemplos:
+- `0 12 * * *` → todos los días a las 12:00 UTC (9:00 ART).
+- `0 12 * * 1-5` → sólo días hábiles.
+- `0 */6 * * *` → cada 6 horas.
+
+Commiteá y pusheá; Vercel redeploya y re-registra la cron.
+
+#### Límites de plan
+
+- **Hobby:** timeout 10s por función, crons granularidad diaria. Alcanza para esta
+  app (el análisis tarda ~3-5 segundos con 3 endpoints de Wallbit + Telegram).
+- **Pro:** timeout 60s (hasta 300s con `maxDuration`), crons intra-día.
+
+Si hace falta más tiempo, agregá a `vercel.json`:
+
+```json
+"functions": { "api/analyze.ts": { "maxDuration": 60 } }
+```
+
+(requiere plan Pro o superior).
 
 ## Config disponible
 

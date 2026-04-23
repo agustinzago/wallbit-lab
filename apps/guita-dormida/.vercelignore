@@ -1,9 +1,7 @@
 node_modules
 dist
 .turbo
-.vercel
 .env
 .env.local
-*.log
 coverage
-.DS_Store
+src/**/*.test.ts

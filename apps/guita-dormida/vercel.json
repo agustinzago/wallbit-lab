@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
+  "buildCommand": "cd ../.. && pnpm turbo build --filter=@wallbit-lab/app-guita-dormida",
+  "framework": null,
+  "crons": [
+    {
+      "path": "/api/analyze",
+      "schedule": "0 12 * * *"
+    }
+  ]
+}
