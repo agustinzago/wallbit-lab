@@ -2,7 +2,13 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
   "buildCommand": "cd ../.. && pnpm turbo build --filter=@wallbit-lab/app-guita-dormida",
+  "outputDirectory": "dist",
   "framework": null,
+  "functions": {
+    "api/analyze.ts": {
+      "runtime": "@vercel/node@5"
+    }
+  },
   "crons": [
     {
       "path": "/api/analyze",
