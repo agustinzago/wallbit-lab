@@ -22,6 +22,7 @@ import type {
   WallbitClient,
 } from '@wallbit-lab/sdk';
 import type { TransactionPoller } from '@wallbit-lab/wallbit-ingest';
+import { fetchDolares, midRate } from './dolarApi.js';
 
 // Piso no negociable del colchón. Incluso si el gasto mensual es cero, dejamos
 // este mínimo en checking antes de considerar cualquier saldo como ocioso.
@@ -96,13 +97,25 @@ export class IdleCapitalAnalyzer {
   }
 
   async analyze(): Promise<AnalysisResult> {
-    const [checkingBalances, stocks, transactions] = await Promise.all([
+    const [checkingBalances, stocks, transactions, dolares] = await Promise.all([
       this.client.balance.getChecking(),
       this.client.balance.getStocks(),
       this.poller.fetchRecent({ days: this.analysisDays }),
+      // Degradamos si DolarApi falla: no abortamos el análisis, sólo perdemos
+      // la conversión ARS→USD para el burn rate.
+      fetchDolares().catch(() => null),
     ]);
 
-    const arsToUsdRate = this.inferArsToUsdRate(transactions);
+    // Preferimos el mid-rate del blue (referencia real del mercado informal).
+    // Fallback: inferimos desde transacciones cross-currency propias. Si no hay
+    // ninguna fuente, los gastos en ARS se ignoran (rate = 0).
+    const arsToUsdRate =
+      dolares !== null
+        ? (midRate(dolares.blue) ?? 0) > 0
+          ? 1 / (midRate(dolares.blue) as number)
+          : 0
+        : this.inferArsToUsdRate(transactions);
+
     const monthlyBurn = this.computeMonthlyBurnRate(transactions, arsToUsdRate);
     const recommendedBuffer = Math.max(
       MIN_BUFFER_USD,
@@ -152,13 +165,8 @@ export class IdleCapitalAnalyzer {
     return (totalUsd / this.analysisDays) * 30;
   }
 
-  // Inferimos el rate ARS→USD implícito desde transacciones cross-currency del
-  // propio período: cualquier tx con source=ARS y dest=USD (o viceversa) revela
-  // cuántos ARS necesitás por 1 USD. Si no hay tx así, devolvemos 0 (no
-  // convertimos ARS) — conservador.
-  //
-  // En el futuro se puede reemplazar por client.rates.get({source: 'ARS', dest:
-  // 'USD'}), que es la fuente oficial.
+  // Fallback: inferimos el rate ARS→USD desde transacciones cross-currency del
+  // propio período. Sólo se usa cuando DolarApi no está disponible.
   private inferArsToUsdRate(transactions: readonly Transaction[]): number {
     for (const tx of transactions) {
       const src = tx.source_currency.code;
