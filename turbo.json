@@ -7,8 +7,14 @@
     "WALLBIT_API_BASE_URL",
     "ANTHROPIC_API_KEY",
     "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_CHAT_ID",
     "DATABASE_URL",
-    "LOG_LEVEL"
+    "LOG_LEVEL",
+    "ANALYSIS_DAYS",
+    "IDLE_THRESHOLD_USD",
+    "CHECKING_BUFFER_MULTIPLIER",
+    "DRY_RUN",
+    "CRON_SECRET"
   ],
   "tasks": {
     "build": {
