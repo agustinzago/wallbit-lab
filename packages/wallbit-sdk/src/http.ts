@@ -6,8 +6,9 @@ import type { ResolvedConfig } from './config.js';
 import {
   WallbitAuthError,
   WallbitError,
-  WallbitKycError,
   WallbitNetworkError,
+  WallbitNotFoundError,
+  WallbitPreconditionError,
   WallbitRateLimitError,
   WallbitServerError,
   WallbitValidationError,
@@ -18,7 +19,7 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export interface RequestOptions<S extends z.ZodTypeAny> {
   readonly method?: HttpMethod;
   readonly path: string;
-  readonly query?: Record<string, string | number | undefined>;
+  readonly query?: Record<string, string | number | boolean | undefined>;
   readonly body?: unknown;
   readonly schema: S;
   readonly signal?: AbortSignal;
@@ -32,6 +33,9 @@ export class HttpClient {
 
   async request<S extends z.ZodTypeAny>(opts: RequestOptions<S>): Promise<z.infer<S>> {
     const url = this.buildUrl(opts.path, opts.query);
+    const method = opts.method ?? 'GET';
+    const hasBody = opts.body !== undefined;
+
     let lastError: unknown;
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -44,15 +48,17 @@ export class HttpClient {
         else opts.signal.addEventListener('abort', forwardAbort, { once: true });
       }
 
+      const headers: Record<string, string> = {
+        'X-API-Key': this.config.apiKey,
+        Accept: 'application/json',
+      };
+      if (hasBody) headers['Content-Type'] = 'application/json';
+
       try {
         const res = await fetch(url, {
-          method: opts.method ?? 'GET',
-          headers: {
-            'X-API-Key': this.config.apiKey,
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          body: opts.body !== undefined ? JSON.stringify(opts.body) : null,
+          method,
+          headers,
+          body: hasBody ? JSON.stringify(opts.body) : null,
           signal: controller.signal,
         });
 
@@ -66,8 +72,17 @@ export class HttpClient {
             requestId,
           });
         }
+        if (res.status === 404) {
+          throw new WallbitNotFoundError(`Recurso no encontrado (HTTP 404).`, {
+            statusCode: 404,
+            requestId,
+          });
+        }
         if (res.status === 412) {
-          throw new WallbitKycError('KYC pendiente o incompleto (HTTP 412).', {
+          // La spec cubre tres escenarios en 412: KYC incompleto, cuenta bloqueada,
+          // cuenta migrando. El error concreto lo dice el body (`error` o `message`).
+          const detail = await safeText(res);
+          throw new WallbitPreconditionError(`Precondición fallida (HTTP 412): ${detail}`, {
             statusCode: 412,
             requestId,
           });
@@ -80,9 +95,11 @@ export class HttpClient {
           });
         }
         if (res.status === 429) {
+          const retryAfter = parseRetryAfter(res);
           throw new WallbitRateLimitError('Rate limit alcanzado (HTTP 429).', {
             statusCode: 429,
             requestId,
+            ...(retryAfter !== undefined ? { retryAfterSeconds: retryAfter } : {}),
           });
         }
         if (res.status >= 500) {
@@ -132,7 +149,10 @@ export class HttpClient {
     throw lastError instanceof Error ? lastError : new WallbitNetworkError('Retries agotados.');
   }
 
-  private buildUrl(path: string, query?: Record<string, string | number | undefined>): string {
+  private buildUrl(
+    path: string,
+    query?: Record<string, string | number | boolean | undefined>,
+  ): string {
     const normalized = path.startsWith('/') ? path : `/${path}`;
     const url = new URL(`${this.config.baseUrl}${normalized}`);
     if (query) {
@@ -144,8 +164,6 @@ export class HttpClient {
   }
 
   private logRateLimit(res: Response): void {
-    // Logging opcional controlado por LOG_LEVEL. Mantengo esto minimal a propósito;
-    // cuando tengamos un logger inyectable lo cableamos acá.
     if (process.env['LOG_LEVEL'] !== 'debug') return;
     const remaining = res.headers.get('X-RateLimit-Remaining');
     const reset = res.headers.get('X-RateLimit-Reset');
@@ -174,4 +192,11 @@ async function safeText(res: Response): Promise<string> {
   } catch {
     return '<cuerpo ilegible>';
   }
+}
+
+function parseRetryAfter(res: Response): number | undefined {
+  const header = res.headers.get('Retry-After');
+  if (header === null) return undefined;
+  const n = Number(header);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
 }

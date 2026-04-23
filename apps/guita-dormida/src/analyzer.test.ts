@@ -1,45 +1,29 @@
-// Tests del IdleCapitalAnalyzer. Mockeamos WallbitClient y TransactionPoller con
-// vi.fn() para no hacer requests reales; lo que probamos es la lógica de decisión.
+// Tests del IdleCapitalAnalyzer. Mockeamos WallbitClient y TransactionPoller
+// con vi.fn() para no hacer requests reales; lo que probamos es la lógica de
+// decisión.
 
 import { describe, expect, it, vi } from 'vitest';
-import type { WallbitClient, Transaction } from '@wallbit-lab/sdk';
+import type {
+  CheckingBalance,
+  StocksPosition,
+  Transaction,
+  WallbitClient,
+} from '@wallbit-lab/sdk';
 import type { TransactionPoller } from '@wallbit-lab/wallbit-ingest';
 import { IdleCapitalAnalyzer } from './analyzer.js';
 import { buildReport } from './reporter.js';
 
 interface MockSetup {
-  readonly checking: Array<{ currency: string; total: string; available?: string }>;
-  readonly stocks?: Array<{
-    symbol: string;
-    quantity: string;
-    averagePrice?: string;
-    marketValue?: string;
-    currency?: string;
-  }>;
-  readonly wallets?: Array<{
-    id: string;
-    network: string;
-    address: string;
-    currency: string;
-    balance?: string;
-  }>;
+  readonly checking: CheckingBalance[];
+  readonly stocks?: StocksPosition[];
   readonly transactions?: Transaction[];
 }
 
 function buildMocks(setup: MockSetup): { client: WallbitClient; poller: TransactionPoller } {
   const client = {
     balance: {
-      getChecking: vi.fn().mockResolvedValue(
-        setup.checking.map((c) => ({
-          currency: c.currency,
-          available: c.available ?? c.total,
-          total: c.total,
-        })),
-      ),
+      getChecking: vi.fn().mockResolvedValue(setup.checking),
       getStocks: vi.fn().mockResolvedValue(setup.stocks ?? []),
-    },
-    wallets: {
-      getAll: vi.fn().mockResolvedValue(setup.wallets ?? []),
     },
   } as unknown as WallbitClient;
 
@@ -50,19 +34,22 @@ function buildMocks(setup: MockSetup): { client: WallbitClient; poller: Transact
   return { client, poller };
 }
 
-// Helper para construir transacciones de egreso USD que suman a un gasto mensual
-// dado. El analyzer normaliza a 30 días dividiendo por analysisDays * 30, así que si
-// analysisDays = 30 y queremos un burn de X, debemos inyectar X en egresos.
+// Construye transacciones de egreso USD que suman a un gasto mensual dado.
+// Si analysisDays = 30 y queremos burn = X, inyectamos X en egresos.
 function buildEgressTxs(totalUsd: number, days = 30): Transaction[] {
   const now = Date.now();
   return [
     {
-      id: 'tx-egress-1',
+      uuid: 'tx-egress-1',
       type: 'CARD_PAYMENT',
-      currency: 'USD',
-      amount: String(totalUsd),
-      date: new Date(now - 1_000 * 60 * 60 * 24 * Math.floor(days / 2)).toISOString(),
-      description: 'groceries',
+      external_address: null,
+      source_currency: { code: 'USD', alias: 'USD' },
+      dest_currency: { code: 'USD', alias: 'USD' },
+      source_amount: totalUsd,
+      dest_amount: totalUsd,
+      status: 'COMPLETED',
+      created_at: new Date(now - 1_000 * 60 * 60 * 24 * Math.floor(days / 2)).toISOString(),
+      comment: null,
     },
   ];
 }
@@ -70,7 +57,7 @@ function buildEgressTxs(totalUsd: number, days = 30): Transaction[] {
 describe('IdleCapitalAnalyzer', () => {
   it('detecta USD 3500 como ocioso cuando saldo=5000 y gasto mensual=1000', async () => {
     const { client, poller } = buildMocks({
-      checking: [{ currency: 'USD', total: '5000' }],
+      checking: [{ currency: 'USD', balance: 5000 }],
       transactions: buildEgressTxs(1000),
     });
 
@@ -94,7 +81,7 @@ describe('IdleCapitalAnalyzer', () => {
 
   it('no detecta ocioso cuando saldo=800 y gasto mensual=1000', async () => {
     const { client, poller } = buildMocks({
-      checking: [{ currency: 'USD', total: '800' }],
+      checking: [{ currency: 'USD', balance: 800 }],
       transactions: buildEgressTxs(1000),
     });
 
@@ -107,24 +94,17 @@ describe('IdleCapitalAnalyzer', () => {
     });
 
     const result = await analyzer.analyze();
-
     const checkingAsset = result.idleAssets.find((a) => a.category === 'checking');
     expect(checkingAsset).toBeUndefined();
   });
 
-  it('detecta wallet USDT con balance 1000 sin movimiento como dormida', async () => {
+  it('trata USDT en checking 1:1 con USD y lo reporta si supera el colchón', async () => {
     const { client, poller } = buildMocks({
-      checking: [{ currency: 'USD', total: '100' }],
-      transactions: buildEgressTxs(50),
-      wallets: [
-        {
-          id: 'w1',
-          network: 'TRON',
-          address: 'TAbc123',
-          currency: 'USDT',
-          balance: '1000',
-        },
+      checking: [
+        { currency: 'USD', balance: 300 },
+        { currency: 'USDT', balance: 2500 },
       ],
+      transactions: buildEgressTxs(400),
     });
 
     const analyzer = new IdleCapitalAnalyzer({
@@ -136,16 +116,59 @@ describe('IdleCapitalAnalyzer', () => {
     });
 
     const result = await analyzer.analyze();
+    const usdt = result.idleAssets.find(
+      (a) => a.category === 'checking' && a.currency === 'USDT',
+    );
+    expect(usdt).toBeDefined();
+    expect(usdt?.amount).toBeGreaterThan(0);
+  });
 
-    const cryptoAsset = result.idleAssets.find((a) => a.category === 'crypto_wallet');
-    expect(cryptoAsset).toBeDefined();
-    expect(cryptoAsset?.amount).toBe(1000);
-    expect(cryptoAsset?.currency).toBe('USDT');
+  it('detecta cash sin invertir en cuenta INVESTMENT (symbol: USD, shares > threshold)', async () => {
+    const { client, poller } = buildMocks({
+      checking: [{ currency: 'USD', balance: 100 }],
+      stocks: [
+        { symbol: 'AAPL', shares: 5 },
+        { symbol: 'USD', shares: 1500 },
+      ],
+      transactions: buildEgressTxs(400),
+    });
+
+    const analyzer = new IdleCapitalAnalyzer({
+      client,
+      poller,
+      analysisDays: 30,
+      idleThresholdUsd: 500,
+      checkingBufferMultiplier: 1.5,
+    });
+
+    const result = await analyzer.analyze();
+    const cash = result.idleAssets.find((a) => a.category === 'investment_cash');
+    expect(cash).toBeDefined();
+    expect(cash?.amount).toBe(1500);
+  });
+
+  it('no reporta cuando el cash en INVESTMENT está por debajo del threshold', async () => {
+    const { client, poller } = buildMocks({
+      checking: [{ currency: 'USD', balance: 100 }],
+      stocks: [{ symbol: 'USD', shares: 400 }],
+      transactions: buildEgressTxs(400),
+    });
+
+    const analyzer = new IdleCapitalAnalyzer({
+      client,
+      poller,
+      analysisDays: 30,
+      idleThresholdUsd: 500,
+      checkingBufferMultiplier: 1.5,
+    });
+
+    const result = await analyzer.analyze();
+    expect(result.idleAssets.find((a) => a.category === 'investment_cash')).toBeUndefined();
   });
 
   it('cuando hasIdle=false, el reporte no menciona "Capital ocioso"', async () => {
     const { client, poller } = buildMocks({
-      checking: [{ currency: 'USD', total: '300' }],
+      checking: [{ currency: 'USD', balance: 300 }],
       transactions: buildEgressTxs(400),
     });
 

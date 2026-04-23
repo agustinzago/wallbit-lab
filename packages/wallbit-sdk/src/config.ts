@@ -13,7 +13,7 @@ export interface ResolvedConfig {
   readonly timeout: number;
 }
 
-const DEFAULT_BASE_URL = 'https://api.wallbit.io';
+const DEFAULT_BASE_URL = 'https://api.wallbit.io/api/public';
 const DEFAULT_TIMEOUT_MS = 15_000;
 
 export function resolveConfig(config: WallbitClientConfig): ResolvedConfig {

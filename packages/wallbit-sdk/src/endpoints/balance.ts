@@ -1,44 +1,45 @@
+// GET /api/public/v1/balance/checking
+// GET /api/public/v1/balance/stocks
+//
+// Ambos devuelven `{ data: [...] }`. Devolvemos el array sin el wrapper; si el
+// usuario necesita el wrapper, lo reconstruye trivialmente.
+
 import { z } from 'zod';
 import type { HttpClient } from '../http.js';
-import { BalanceSchema, type Balance } from '../types.js';
+import {
+  CheckingBalanceSchema,
+  StocksPositionSchema,
+  type CheckingBalance,
+  type StocksPosition,
+} from '../types.js';
 
-// TODO(verify-api): path y envelope exactos. Es posible que la API devuelva un array
-// plano en lugar de `{ balances: [...] }`, o que separe por currency en sub-recursos.
 const GetCheckingBalanceResponseSchema = z.object({
-  balances: z.array(BalanceSchema),
+  data: z.array(CheckingBalanceSchema),
 });
-
-// TODO(verify-api): shape de posiciones de stocks; los nombres de campos pueden variar
-// (quantity vs units, averagePrice vs avgCost, etc.).
-const StocksPositionSchema = z.object({
-  symbol: z.string(),
-  quantity: z.string(),
-  averagePrice: z.string().optional(),
-  marketValue: z.string().optional(),
-  currency: z.string().optional(),
-});
-export type StocksPosition = z.infer<typeof StocksPositionSchema>;
 
 const GetStocksBalanceResponseSchema = z.object({
-  positions: z.array(StocksPositionSchema),
+  data: z.array(StocksPositionSchema),
 });
 
 export class BalanceResource {
   constructor(private readonly http: HttpClient) {}
 
-  async getChecking(): Promise<Balance[]> {
+  // Sólo devuelve currencies con balance > 0. Para un user nuevo puede ser [].
+  async getChecking(): Promise<CheckingBalance[]> {
     const res = await this.http.request({
       path: '/v1/balance/checking',
       schema: GetCheckingBalanceResponseSchema,
     });
-    return res.balances;
+    return res.data;
   }
 
+  // El cash disponible en la cuenta INVESTMENT aparece como un item con
+  // `symbol: "USD"` dentro del mismo array. Sólo devuelve posiciones con shares > 0.
   async getStocks(): Promise<StocksPosition[]> {
     const res = await this.http.request({
       path: '/v1/balance/stocks',
       schema: GetStocksBalanceResponseSchema,
     });
-    return res.positions;
+    return res.data;
   }
 }

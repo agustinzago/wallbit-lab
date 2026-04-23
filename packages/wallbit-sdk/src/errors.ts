@@ -1,5 +1,5 @@
 // Jerarquía de errores tipados del SDK. Todos heredan de WallbitError para que el
-// usuario pueda hacer `catch (err) { if (err instanceof WallbitError) ... }`.
+// consumidor pueda hacer `catch (err) { if (err instanceof WallbitError) ... }`.
 
 export interface WallbitErrorOptions {
   readonly cause?: unknown;
@@ -35,12 +35,17 @@ export class WallbitAuthError extends WallbitError {
   }
 }
 
-export class WallbitKycError extends WallbitError {
+// 412: según la spec cubre tres casos reales — KYC incompleto, cuenta bloqueada
+// y cuenta migrando. El nombre histórico era WallbitKycError (cuando se asumía
+// sólo KYC); ahora usamos `WallbitPreconditionError` y mantenemos el alias por
+// compatibilidad hacia adentro.
+export class WallbitPreconditionError extends WallbitError {
   constructor(message: string, options: WallbitErrorOptions = {}) {
     super(message, options);
-    this.name = 'WallbitKycError';
+    this.name = 'WallbitPreconditionError';
   }
 }
+export { WallbitPreconditionError as WallbitKycError };
 
 export class WallbitValidationError extends WallbitError {
   constructor(message: string, options: WallbitErrorOptions = {}) {
@@ -49,10 +54,23 @@ export class WallbitValidationError extends WallbitError {
   }
 }
 
-export class WallbitRateLimitError extends WallbitError {
+export class WallbitNotFoundError extends WallbitError {
   constructor(message: string, options: WallbitErrorOptions = {}) {
     super(message, options);
+    this.name = 'WallbitNotFoundError';
+  }
+}
+
+export class WallbitRateLimitError extends WallbitError {
+  readonly retryAfterSeconds: number | undefined;
+
+  constructor(
+    message: string,
+    options: WallbitErrorOptions & { retryAfterSeconds?: number } = {},
+  ) {
+    super(message, options);
     this.name = 'WallbitRateLimitError';
+    this.retryAfterSeconds = options.retryAfterSeconds;
   }
 }
 

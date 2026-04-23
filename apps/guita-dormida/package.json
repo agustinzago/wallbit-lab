@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "analyze": "tsx src/index.ts",
-    "analyze:dry": "DRY_RUN=true tsx src/index.ts",
+    "dev": "tsx watch --env-file=.env src/index.ts",
+    "analyze": "tsx --env-file=.env src/index.ts",
+    "analyze:dry": "DRY_RUN=true tsx --env-file=.env src/index.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

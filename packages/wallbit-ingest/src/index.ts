@@ -5,4 +5,5 @@ export type {
   FetchRecentParams,
   Logger,
   TransactionPollerOptions,
+  TransactionsPageLimit,
 } from './poller.js';

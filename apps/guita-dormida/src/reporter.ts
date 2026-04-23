@@ -7,8 +7,7 @@ const TIMEZONE = 'America/Argentina/Buenos_Aires';
 
 const CATEGORY_LABEL: Record<IdleCategory, string> = {
   checking: 'Checking ocioso',
-  crypto_wallet: 'Cripto dormida',
-  investment: 'Inversión estancada',
+  investment_cash: 'Cash sin invertir',
 };
 
 export function buildReport(result: AnalysisResult): string {

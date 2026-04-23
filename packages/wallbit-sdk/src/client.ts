@@ -1,13 +1,18 @@
-// Entry point del SDK. La clase expone los recursos como propiedades namespaced
-// (client.balance.getChecking(), client.transactions.list(), etc.) para que la
-// superficie pública sea explorable con autocompletado.
+// Entry point del SDK. Expone recursos namespaced (client.balance.getChecking(),
+// client.transactions.list(), etc.) para que la superficie pública sea
+// explorable con autocompletado.
 
 import { resolveConfig, type WallbitClientConfig } from './config.js';
 import { HttpClient } from './http.js';
-import { AccountResource } from './endpoints/account.js';
+import { AccountDetailsResource } from './endpoints/accountDetails.js';
+import { ApiKeyResource } from './endpoints/apiKey.js';
 import { AssetsResource } from './endpoints/assets.js';
 import { BalanceResource } from './endpoints/balance.js';
+import { CardsResource } from './endpoints/cards.js';
+import { FeesResource } from './endpoints/fees.js';
 import { OperationsResource } from './endpoints/operations.js';
+import { RatesResource } from './endpoints/rates.js';
+import { RoboAdvisorResource } from './endpoints/roboadvisor.js';
 import { TradesResource } from './endpoints/trades.js';
 import { TransactionsResource } from './endpoints/transactions.js';
 import { WalletsResource } from './endpoints/wallets.js';
@@ -19,7 +24,12 @@ export class WallbitClient {
   readonly operations: OperationsResource;
   readonly assets: AssetsResource;
   readonly wallets: WalletsResource;
-  readonly account: AccountResource;
+  readonly accountDetails: AccountDetailsResource;
+  readonly rates: RatesResource;
+  readonly fees: FeesResource;
+  readonly cards: CardsResource;
+  readonly roboAdvisor: RoboAdvisorResource;
+  readonly apiKey: ApiKeyResource;
 
   constructor(config: WallbitClientConfig) {
     const resolved = resolveConfig(config);
@@ -30,6 +40,11 @@ export class WallbitClient {
     this.operations = new OperationsResource(http);
     this.assets = new AssetsResource(http);
     this.wallets = new WalletsResource(http);
-    this.account = new AccountResource(http);
+    this.accountDetails = new AccountDetailsResource(http);
+    this.rates = new RatesResource(http);
+    this.fees = new FeesResource(http);
+    this.cards = new CardsResource(http);
+    this.roboAdvisor = new RoboAdvisorResource(http);
+    this.apiKey = new ApiKeyResource(http);
   }
 }

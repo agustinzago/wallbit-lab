@@ -1,35 +1,52 @@
-// Núcleo del análisis de capital ocioso. Lee estado (checking, stocks, wallets) y
-// transacciones recientes, calcula un colchón dinámico a partir del burn rate real
-// y detecta tres categorías de ociosidad: checking, wallets cripto y stocks de
-// renta fija estancados.
+// Núcleo del análisis de capital ocioso. Lee el estado financiero (checking y
+// stocks), calcula un colchón dinámico a partir del burn rate real, y detecta
+// dos categorías de ociosidad:
+//  - checking: USD/USDT/USDC en cuenta corriente por encima del colchón.
+//  - investment_cash: USD no invertido dentro de la cuenta de inversión
+//    (aparece como `symbol: "USD"` en /balance/stocks).
 //
-// TODO(verify-api): varios campos de los responses de Wallbit se asumen sin
-// confirmación (ver schemas del SDK). Si algo rompe al probar contra la API real,
-// revisá los `passthrough` y ajustá los schemas zod del SDK.
+// La categoría "crypto_wallet" que existía en v0.1 se removió: la API pública
+// de Wallbit NO expone balance por wallet cripto (son sólo direcciones de
+// depósito). El saldo cripto real del user vive en /balance/checking bajo
+// USDT/USDC, y ya lo cubre el detector de checking.
+//
+// La detección de T-Bills estancadas también se removió por ahora: requiere
+// cruzar /balance/stocks con /assets/{symbol} y reconstruir el average price
+// desde transactions — demasiada lógica para v0.2. Lo abordamos cuando tengamos
+// datos reales.
 
 import type {
-  Balance,
+  CheckingBalance,
   StocksPosition,
   Transaction,
-  Wallet,
   WallbitClient,
 } from '@wallbit-lab/sdk';
 import type { TransactionPoller } from '@wallbit-lab/wallbit-ingest';
 
-// Piso no negociable del colchón. Incluso si el gasto mensual es cero, dejamos este
-// mínimo en checking antes de considerar cualquier saldo como ocioso.
+// Piso no negociable del colchón. Incluso si el gasto mensual es cero, dejamos
+// este mínimo en checking antes de considerar cualquier saldo como ocioso.
 const MIN_BUFFER_USD = 200;
 
-// Rendimiento anual asumido de T-Bills a corto plazo (SGOV/BIL/SHV ~5% en 2024-2026).
-// Es una referencia para costo de oportunidad, no una promesa.
+// Rendimiento anual asumido de T-Bills cortas (SGOV/BIL/SHV). Referencia para
+// costo de oportunidad, no una promesa.
 const TBILL_ANNUAL_YIELD = 0.05;
 
-// Símbolos que tratamos como renta fija corta. Alternativa: consultar
-// `client.assets.getBySymbol()` y filtrar por category === 'TREASURY_BILL', pero
-// eso implica una request por símbolo. Hardcodeamos la lista conocida para v0.1.
-const TREASURY_BILL_SYMBOLS = new Set(['SGOV', 'BIL', 'SHV', 'TBIL', 'VBIL', 'GBIL']);
+// Tipos de transacción considerados "egresos" (gasto real del usuario). La API
+// no publica un enum cerrado, así que matcheamos por prefijo/contiene: cubre
+// WITHDRAWAL_LOCAL, WITHDRAWAL_CRYPTO, CARD_PAYMENT, FEE, etc., sin rompernos
+// cuando aparezcan nuevos.
+function isEgressType(type: string): boolean {
+  const t = type.toUpperCase();
+  if (t.startsWith('WITHDRAWAL')) return true;
+  if (t.includes('CARD_PAYMENT') || t.includes('CARD_PURCHASE')) return true;
+  if (t === 'FEE') return true;
+  return false;
+}
 
-export type IdleCategory = 'checking' | 'crypto_wallet' | 'investment';
+// Stablecoins USD-pegged: las tratamos 1:1 con USD para todas las cuentas.
+const USD_LIKE = new Set(['USD', 'USDT', 'USDC']);
+
+export type IdleCategory = 'checking' | 'investment_cash';
 
 export interface IdleAsset {
   readonly category: IdleCategory;
@@ -79,14 +96,14 @@ export class IdleCapitalAnalyzer {
   }
 
   async analyze(): Promise<AnalysisResult> {
-    const [checkingBalances, stocks, wallets, transactions] = await Promise.all([
+    const [checkingBalances, stocks, transactions] = await Promise.all([
       this.client.balance.getChecking(),
       this.client.balance.getStocks(),
-      this.client.wallets.getAll(),
       this.poller.fetchRecent({ days: this.analysisDays }),
     ]);
 
-    const monthlyBurn = this.computeMonthlyBurnRate(transactions);
+    const arsToUsdRate = this.inferArsToUsdRate(transactions);
+    const monthlyBurn = this.computeMonthlyBurnRate(transactions, arsToUsdRate);
     const recommendedBuffer = Math.max(
       MIN_BUFFER_USD,
       monthlyBurn * this.bufferMultiplier,
@@ -94,8 +111,7 @@ export class IdleCapitalAnalyzer {
 
     const idleAssets: IdleAsset[] = [
       ...this.detectIdleChecking(checkingBalances, recommendedBuffer),
-      ...this.detectIdleCryptoWallets(wallets, transactions),
-      ...this.detectStagnantInvestments(stocks),
+      ...this.detectInvestmentCash(stocks),
     ];
 
     const totalIdleUSD = round2(idleAssets.reduce((acc, a) => acc + a.amount, 0));
@@ -115,61 +131,57 @@ export class IdleCapitalAnalyzer {
     };
   }
 
-  // Paso 2: calcular el gasto mensual promedio en USD a partir de los egresos
-  // del período. "Egreso" = tipos que sacan plata (withdrawals, card, fee). TRADE e
-  // INTERNAL_TRANSFER se excluyen explícitamente: no son consumo.
-  private computeMonthlyBurnRate(transactions: readonly Transaction[]): number {
-    const egressTypes = new Set(['WITHDRAWAL', 'CARD_PAYMENT', 'FEE']);
-    const arsToUsd = this.inferArsToUsdRate(transactions);
-
+  // Gasto mensual promedio en USD basado en los egresos del período. Normalizamos
+  // a ventana de 30 días sobre `analysisDays` para obtener un "mes estandarizado".
+  private computeMonthlyBurnRate(
+    transactions: readonly Transaction[],
+    arsToUsdRate: number,
+  ): number {
     let totalUsd = 0;
     for (const tx of transactions) {
-      if (!egressTypes.has(tx.type)) continue;
-      const absAmount = Math.abs(parseAmount(tx.amount));
-      if (tx.currency === 'USD') {
-        totalUsd += absAmount;
-      } else if (tx.currency === 'USDT' || tx.currency === 'USDC') {
-        // Stablecoins USD-pegged: los tratamos 1:1 para el burn rate.
-        totalUsd += absAmount;
-      } else if (tx.currency === 'ARS') {
-        totalUsd += absAmount * arsToUsd;
+      if (!isEgressType(tx.type)) continue;
+      const currency = tx.source_currency.code;
+      const amount = Math.abs(tx.source_amount);
+      if (USD_LIKE.has(currency)) {
+        totalUsd += amount;
+      } else if (currency === 'ARS' && arsToUsdRate > 0) {
+        totalUsd += amount * arsToUsdRate;
       }
-      // Otras monedas (EUR, BTC, ETH) las ignoramos por ahora; son ruido raro acá.
+      // Otras monedas las ignoramos por ahora: señal débil, riesgo de ruido.
     }
-
-    // Normalizar al mes (30 días) sobre la ventana analizada.
     return (totalUsd / this.analysisDays) * 30;
   }
 
-  // Heurística: buscar en las transacciones del período alguna TRADE o INTERNAL_TRANSFER
-  // que tenga explícitamente un par ARS/USD en `metadata.rate`. Si no existe, fallback
-  // conservador a 0 (no convertimos ARS — asume que no hay gasto relevante en ARS).
+  // Inferimos el rate ARS→USD implícito desde transacciones cross-currency del
+  // propio período: cualquier tx con source=ARS y dest=USD (o viceversa) revela
+  // cuántos ARS necesitás por 1 USD. Si no hay tx así, devolvemos 0 (no
+  // convertimos ARS) — conservador.
   //
-  // TODO(verify-api): el campo real donde Wallbit expone la tasa aplicada puede ser
-  // `metadata.exchangeRate`, `metadata.price`, o estar ausente. Ajustar cuando se pruebe.
+  // En el futuro se puede reemplazar por client.rates.get({source: 'ARS', dest:
+  // 'USD'}), que es la fuente oficial.
   private inferArsToUsdRate(transactions: readonly Transaction[]): number {
     for (const tx of transactions) {
-      const meta = tx.metadata;
-      if (meta === undefined) continue;
-      const candidate = meta['rate'] ?? meta['exchangeRate'] ?? meta['price'];
-      if (typeof candidate === 'string' && Number.isFinite(Number(candidate))) {
-        const rate = Number(candidate);
-        if (rate > 0) return 1 / rate;
+      const src = tx.source_currency.code;
+      const dst = tx.dest_currency.code;
+      if (src === 'ARS' && dst === 'USD' && tx.dest_amount > 0) {
+        return tx.dest_amount / tx.source_amount;
       }
-      if (typeof candidate === 'number' && candidate > 0) {
-        return 1 / candidate;
+      if (src === 'USD' && dst === 'ARS' && tx.dest_amount > 0) {
+        return tx.source_amount / tx.dest_amount;
       }
     }
     return 0;
   }
 
-  // Paso 3a: checking ocioso.
-  private detectIdleChecking(balances: readonly Balance[], buffer: number): IdleAsset[] {
+  // Checking ocioso: todo lo que esté en USD/USDT/USDC por encima del colchón.
+  private detectIdleChecking(
+    balances: readonly CheckingBalance[],
+    buffer: number,
+  ): IdleAsset[] {
     const result: IdleAsset[] = [];
     for (const bal of balances) {
-      if (bal.currency !== 'USD' && bal.currency !== 'USDT' && bal.currency !== 'USDC') continue;
-      const total = parseAmount(bal.total);
-      const excess = total - buffer;
+      if (!USD_LIKE.has(bal.currency)) continue;
+      const excess = bal.balance - buffer;
       if (excess > this.idleThresholdUsd) {
         const idleDays = this.analysisDays;
         const opportunityCost = computeOpportunityCost(excess, idleDays);
@@ -179,99 +191,38 @@ export class IdleCapitalAnalyzer {
           amount: round2(excess),
           idleDays,
           opportunityCost: round2(opportunityCost),
-          description: `Tenés USD ${round2(excess)} en checking por encima del colchón recomendado (USD ${round2(buffer)}).`,
+          description: `Tenés USD ${round2(excess)} en checking (${bal.currency}) por encima del colchón recomendado (USD ${round2(buffer)}).`,
           suggestedAction:
-            'Movelo a T-Bills cortos (SGOV o BIL) desde el dashboard de Wallbit → Inversiones.',
+            'Movelo a T-Bills cortos (SGOV o BIL) desde el dashboard de Wallbit → Inversiones, o depositalo a un Robo Advisor.',
         });
       }
     }
     return result;
   }
 
-  // Paso 3b: cripto dormida. Wallet con saldo USDT/USDC relevante y sin movimiento
-  // en la ventana analizada se considera dormida.
-  private detectIdleCryptoWallets(
-    wallets: readonly Wallet[],
-    transactions: readonly Transaction[],
-  ): IdleAsset[] {
-    const minAmount = this.idleThresholdUsd / 2;
+  // Cash dormido en cuenta de inversión: la API lo reporta como una posición
+  // con `symbol: "USD"` dentro de /balance/stocks. Si está por encima del
+  // threshold, es plata que se movió a "invertir" pero quedó sin asignar.
+  private detectInvestmentCash(positions: readonly StocksPosition[]): IdleAsset[] {
     const result: IdleAsset[] = [];
-
-    for (const wallet of wallets) {
-      if (wallet.currency !== 'USDT' && wallet.currency !== 'USDC') continue;
-      const balanceStr = wallet.balance;
-      if (balanceStr === undefined) continue;
-      const amount = parseAmount(balanceStr);
-      if (amount < minAmount) continue;
-
-      // Hay movimiento si aparece alguna tx con la misma currency o que mencione la wallet.
-      const hasMovement = transactions.some((tx) => {
-        if (tx.currency === wallet.currency) return true;
-        const meta = tx.metadata;
-        if (meta === undefined) return false;
-        const walletRef =
-          typeof meta['walletId'] === 'string' ? meta['walletId'] :
-          typeof meta['address'] === 'string' ? meta['address'] :
-          undefined;
-        return walletRef === wallet.id || walletRef === wallet.address;
-      });
-      if (hasMovement) continue;
-
+    for (const pos of positions) {
+      if (pos.symbol !== 'USD') continue;
+      const amount = pos.shares;
+      if (amount <= this.idleThresholdUsd) continue;
       const opportunityCost = computeOpportunityCost(amount, this.analysisDays);
       result.push({
-        category: 'crypto_wallet',
-        currency: wallet.currency,
+        category: 'investment_cash',
+        currency: 'USD',
         amount: round2(amount),
         idleDays: this.analysisDays,
         opportunityCost: round2(opportunityCost),
-        description: `Wallet ${wallet.currency} (${wallet.network}) con USD ${round2(amount)} sin movimiento en ${this.analysisDays} días.`,
-        suggestedAction: `Convertí a USD y movelo a T-Bills, o usalo en una estrategia con yield (staking/lending).`,
-      });
-    }
-
-    return result;
-  }
-
-  // Paso 3c: posiciones de inversión en renta fija estancadas.
-  // Heurística: valor esperado = valorInicial * (1 + yieldDiario * días); si el valor
-  // actual está por debajo, lo reportamos.
-  private detectStagnantInvestments(positions: readonly StocksPosition[]): IdleAsset[] {
-    const result: IdleAsset[] = [];
-    for (const pos of positions) {
-      if (!TREASURY_BILL_SYMBOLS.has(pos.symbol.toUpperCase())) continue;
-      if (pos.averagePrice === undefined || pos.marketValue === undefined) continue;
-
-      const quantity = parseAmount(pos.quantity);
-      const avgPrice = parseAmount(pos.averagePrice);
-      const marketValue = parseAmount(pos.marketValue);
-      const initialValue = quantity * avgPrice;
-      if (initialValue <= 0) continue;
-
-      const expectedValue =
-        initialValue * (1 + (TBILL_ANNUAL_YIELD / 365) * this.analysisDays);
-      const shortfall = expectedValue - marketValue;
-      if (shortfall <= 0) continue;
-
-      // Sólo reportamos si la brecha supera el umbral; ruidos pequeños no valen alarma.
-      if (shortfall < this.idleThresholdUsd / 10) continue;
-
-      result.push({
-        category: 'investment',
-        currency: pos.currency ?? 'USD',
-        amount: round2(marketValue),
-        idleDays: this.analysisDays,
-        opportunityCost: round2(shortfall),
-        description: `Posición en ${pos.symbol} rindiendo por debajo de lo esperado (shortfall USD ${round2(shortfall)}).`,
-        suggestedAction: `Revisá si la posición sigue siendo T-Bill corto o si quedó en un vehículo menos líquido.`,
+        description: `Tenés USD ${round2(amount)} sin invertir dentro de la cuenta de inversión.`,
+        suggestedAction:
+          'Comprá T-Bills cortos (SGOV, BIL) o asignalo a un Robo Advisor para que genere yield.',
       });
     }
     return result;
   }
-}
-
-function parseAmount(raw: string): number {
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : 0;
 }
 
 function computeOpportunityCost(amount: number, days: number): number {
