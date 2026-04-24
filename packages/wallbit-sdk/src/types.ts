@@ -101,6 +101,10 @@ export const TransactionSchema = z
     status: z.string(),
     created_at: z.string(),
     comment: z.string().nullable().optional(),
+    // Nombre legible del merchant cuando la API lo expone (ej. en CARD_SPENT).
+    // TODO(verify-api): verificar nombre exacto del campo en response real; en
+    // tanto confirmemos, consumidores deben preferir `merchantName ?? external_address`.
+    merchantName: z.string().nullable().optional(),
   })
   .passthrough();
 export type Transaction = z.infer<typeof TransactionSchema>;

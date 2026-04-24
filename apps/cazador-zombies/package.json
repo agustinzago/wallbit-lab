@@ -4,20 +4,27 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --env-file=.env src/index.ts",
+    "hunt": "tsx --env-file=.env src/index.ts",
+    "hunt:dry": "DRY_RUN=true tsx --env-file=.env src/index.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
     "@wallbit-lab/sdk": "workspace:*",
-    "@wallbit-lab/recurrence-engine": "workspace:*",
+    "@wallbit-lab/shared-types": "workspace:*",
+    "@wallbit-lab/wallbit-ingest": "workspace:*",
     "@wallbit-lab/merchant-classifier": "workspace:*",
-    "@wallbit-lab/notify": "workspace:*"
+    "@wallbit-lab/recurrence-engine": "workspace:*",
+    "@wallbit-lab/notify": "workspace:*",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
   }
 }
