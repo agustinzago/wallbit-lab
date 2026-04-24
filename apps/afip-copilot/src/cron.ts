@@ -1,12 +1,13 @@
-// Entry point de afip-copilot. Orquesta: config → DB → FX → Wallbit → TelegramRuntime.
-// Solo usa console.log en este archivo (convención repo: no console.log en packages).
+// Entry point del cron semanal.
+// Diseñado para ser disparado por cron externo (systemd timer, Railway cron, k8s CronJob).
+// Corre una sola vez y termina con exit 0 en éxito, exit 1 en falla.
 
 import { WallbitClient } from '@wallbit-lab/sdk';
 import { ConfigError, loadConfig } from './config.js';
 import { createDb } from './db/client.js';
 import { createFxService } from './fx/factory.js';
 import { createLogger } from './logger.js';
-import { TelegramRuntime } from './telegram/runtime.js';
+import { runWeeklySnapshot } from './cron/weekly.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -19,15 +20,11 @@ async function main(): Promise<void> {
     ...(config.wallbitBaseUrl !== undefined ? { baseUrl: config.wallbitBaseUrl } : {}),
   });
 
-  const runtime = new TelegramRuntime({ config, db, fx, wallbit, logger });
-
-  process.on('SIGTERM', () => runtime.stop());
-  process.on('SIGINT', () => runtime.stop());
+  const result = await runWeeklySnapshot({ config, db, fx, wallbit, logger });
 
   // eslint-disable-next-line no-console
-  console.log('[afip-copilot] Bot arrancando, escuchando chat_id', config.telegramChatId);
-
-  await runtime.run();
+  console.log('[cron] weekly snapshot completado', result);
+  process.exit(0);
 }
 
 main().catch((err: unknown) => {
@@ -37,6 +34,6 @@ main().catch((err: unknown) => {
     process.exit(1);
   }
   // eslint-disable-next-line no-console
-  console.error('[afip-copilot] Fallo inesperado:', err);
+  console.error('[cron] Fallo inesperado:', err);
   process.exit(1);
 });
