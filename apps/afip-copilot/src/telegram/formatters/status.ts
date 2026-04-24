@@ -2,7 +2,7 @@
 // Muestra patrimonio, tabla de tipos de cambio, valuación BP y sugerencia de tramo.
 
 import type { BpProjection, PortfolioSnapshot } from '@wallbit-lab/ar-tax-engine';
-import { midRate, type DolarApiResult, type FxQuote } from '@wallbit-lab/fx-ars';
+import type { DolarApiResult, CotizacionUSD, FxQuote } from '@wallbit-lab/fx-ars';
 
 export function formatStatus(
   portfolio: PortfolioSnapshot,
@@ -88,17 +88,14 @@ function fmtNum(n: number, decimals: number): string {
 }
 
 /** Formatea compra/venta de una cotización como "1.365 / 1.415". */
-function fmtRate(cot: Parameters<typeof midRate>[0]): string {
+function fmtRate(cot: CotizacionUSD): string {
   const compra = cot.compra !== null ? fmtNum(cot.compra, 0) : '-';
   const venta = cot.venta !== null ? fmtNum(cot.venta, 0) : '-';
   return `${compra} / ${venta}`;
 }
 
 /** Brecha porcentual de la venta de `alt` vs la venta de `base`. */
-function calcBrecha(
-  base: Parameters<typeof midRate>[0],
-  alt: Parameters<typeof midRate>[0],
-): string | null {
+function calcBrecha(base: CotizacionUSD, alt: CotizacionUSD): string | null {
   const baseVenta = base.venta;
   const altVenta = alt.venta;
   if (baseVenta === null || altVenta === null || baseVenta === 0) return null;

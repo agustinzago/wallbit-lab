@@ -5,7 +5,7 @@
 import { CsvImporter } from '../../cost-basis/csv-importer.js';
 import type { CommandContext } from '../router.js';
 
-export async function handleImportCostBasis(ctx: CommandContext): Promise<string> {
+export async function handleImportCostBasis(_ctx: CommandContext): Promise<string> {
   return [
     '📎 *Importar cost basis*',
     '',

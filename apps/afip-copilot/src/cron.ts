@@ -22,18 +22,15 @@ async function main(): Promise<void> {
 
   const result = await runWeeklySnapshot({ config, db, fx, wallbit, logger });
 
-  // eslint-disable-next-line no-console
   console.log('[cron] weekly snapshot completado', result);
   process.exit(0);
 }
 
 main().catch((err: unknown) => {
   if (err instanceof ConfigError) {
-    // eslint-disable-next-line no-console
     console.error(err.message);
     process.exit(1);
   }
-  // eslint-disable-next-line no-console
   console.error('[cron] Fallo inesperado:', err);
   process.exit(1);
 });

@@ -1,7 +1,6 @@
 // Handler del comando /ingest.
 // Fuerza una ingesta manual de dividendos de los últimos 90 días.
 
-import { WallbitClient } from '@wallbit-lab/sdk';
 import { DividendDetector } from '../../ingest/dividend-detector.js';
 import { DividendIngester } from '../../ingest/dividend-ingester.js';
 import type { CommandContext } from '../router.js';

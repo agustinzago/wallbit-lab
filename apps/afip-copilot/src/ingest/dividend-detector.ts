@@ -22,7 +22,7 @@ export class DividendDetector {
    * para dividendos no está confirmado. Hipótesis: viene en un campo de texto
    * libre o en la descripción.
    */
-  extractSymbol(tx: Transaction): string | null {
+  extractSymbol(_tx: Transaction): string | null {
     // TODO(verify-api): descomentar y ajustar cuando se confirme el campo real.
     // Hipótesis 1: en tx.comment como "AAPL Dividend"
     // Hipótesis 2: en un campo específico del tipo de dividendo

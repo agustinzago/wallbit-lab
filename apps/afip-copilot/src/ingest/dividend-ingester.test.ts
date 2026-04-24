@@ -52,8 +52,6 @@ function makeDb() {
   };
 }
 
-// Tipo simplificado para el mock de Db — solo lo que usa DividendIngester.
-type MockDb = ReturnType<typeof makeDb>;
 const mockDb = makeDb();
 
 function makeLogger() {

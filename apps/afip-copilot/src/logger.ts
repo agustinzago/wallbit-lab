@@ -19,7 +19,6 @@ export function createLogger(level: LogLevel = 'info'): Logger {
     if (LEVELS[logLevel] < minLevel) return;
     const entry = meta ? `${msg} ${JSON.stringify(meta)}` : msg;
     const prefix = `[afip-copilot] [${logLevel.toUpperCase()}]`;
-    // eslint-disable-next-line no-console
     console.error(`${prefix} ${entry}`);
   }
 

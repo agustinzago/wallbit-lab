@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { simulateSale } from './capital-gain.js';
-import type { CostBasisLot, SaleSimulationInput } from '../types.js';
+import type { CostBasisLot } from '../types.js';
 
 function makeLot(
   id: string,

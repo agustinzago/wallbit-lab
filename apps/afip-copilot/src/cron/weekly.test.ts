@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { formatWeeklyReport } from './reporter.js';
 
 function makeSnapshot(overrides: Partial<{

@@ -5,7 +5,6 @@
 import { TransactionPoller } from '@wallbit-lab/wallbit-ingest';
 import type { FxService } from '@wallbit-lab/fx-ars';
 import type { WallbitClient } from '@wallbit-lab/sdk';
-import { asc, eq, gt, and } from 'drizzle-orm';
 import { costBasisLots } from '../db/schema.js';
 import type { Db } from '../db/client.js';
 import type { Logger } from '../logger.js';

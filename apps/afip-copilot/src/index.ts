@@ -24,7 +24,6 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => runtime.stop());
   process.on('SIGINT', () => runtime.stop());
 
-  // eslint-disable-next-line no-console
   console.log('[afip-copilot] Bot arrancando, escuchando chat_id', config.telegramChatId);
 
   await runtime.run();
@@ -32,11 +31,9 @@ async function main(): Promise<void> {
 
 main().catch((err: unknown) => {
   if (err instanceof ConfigError) {
-    // eslint-disable-next-line no-console
     console.error(err.message);
     process.exit(1);
   }
-  // eslint-disable-next-line no-console
   console.error('[afip-copilot] Fallo inesperado:', err);
   process.exit(1);
 });

@@ -8,7 +8,7 @@ import type { WallbitClient } from '@wallbit-lab/sdk';
 import { dividendLedger } from '../db/schema.js';
 import type { Db } from '../db/client.js';
 import type { Logger } from '../logger.js';
-import { DividendDetector } from './dividend-detector.js';
+import type { DividendDetector } from './dividend-detector.js';
 
 export interface DividendIngesterOptions {
   readonly client: WallbitClient;

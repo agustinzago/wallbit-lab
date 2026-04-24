@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import type { Db } from '../db/client.js';
 import { CsvImporter } from './csv-importer.js';
 
 const CSV_VALID = [
@@ -75,7 +76,7 @@ describe('CsvImporter', () => {
   describe('CSV válido', () => {
     it('inserta N lots correctamente', async () => {
       const db = makeDb();
-      const importer = new CsvImporter(db as unknown as Parameters<typeof CsvImporter['prototype']['import']>[0] extends never ? never : ReturnType<typeof makeDb> extends infer T ? T : never extends never ? never : Parameters<typeof CsvImporter['prototype']['import']>[0] extends never ? never : ReturnType<typeof makeDb> as unknown as import('../db/client.js').Db, makeLogger());
+      const importer = new CsvImporter(db as unknown as Db, makeLogger());
       const result = await importer.import(CSV_VALID);
 
       expect(result.rowsProcessed).toBe(3);
