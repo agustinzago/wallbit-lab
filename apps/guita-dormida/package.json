@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@wallbit-lab/sdk": "workspace:*",
+    "@wallbit-lab/fx-ars": "workspace:*",
     "@wallbit-lab/shared-types": "workspace:*",
     "@wallbit-lab/notify": "workspace:*",
     "@wallbit-lab/wallbit-ingest": "workspace:*",

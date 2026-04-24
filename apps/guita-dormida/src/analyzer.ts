@@ -22,7 +22,7 @@ import type {
   WallbitClient,
 } from '@wallbit-lab/sdk';
 import type { TransactionPoller } from '@wallbit-lab/wallbit-ingest';
-import { fetchDolares, midRate } from './dolarApi.js';
+import { fetchDolares, midRate } from '@wallbit-lab/fx-ars';
 
 // Piso no negociable del colchón. Incluso si el gasto mensual es cero, dejamos
 // este mínimo en checking antes de considerar cualquier saldo como ocioso.
